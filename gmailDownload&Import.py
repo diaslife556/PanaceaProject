@@ -4,17 +4,20 @@ import time
 import keys
 from email import utils
 import psycopg2
+import os
+import glob
+import csv
+from datetime import datetime
 IMAP_SERVER = "imap.gmail.com"
 
-# Petlja ponavljanja skripte
 def fetch_csv():
-        import os
-        # Povezivanje
+        
+        # Connecting to gmail account
         mail = imaplib.IMAP4_SSL(IMAP_SERVER)
         mail.login(keys.EMAIL_ACCOUNT, keys.APP_PASSWORD)
         mail.select("inbox")
 
-        # Pronalazak svake pošte preko ID
+        # Find all unseen mail
         status, messages = mail.search(None, "UNSEEN")
         mail_ids = messages[0].split()
 
@@ -22,28 +25,28 @@ def fetch_csv():
             print("No emails found.")
             return
 
-        # Spremanje najnovije pošte
+        # Fetch newest mail
         latest_email_id = mail_ids[-1]
 
-        # Izdvajanje poveznica/dokumenta u pošti
+        # Splitting mail's content section
         status, msg_data = mail.fetch(latest_email_id, "(RFC822)")
         for response_part in msg_data:
             if isinstance(response_part, tuple):
                 msg = email.message_from_bytes(response_part[1])
 
-                # Provjera pošiljatelja
+                # Verifying sender
                 sender_address = email.utils.parseaddr(msg.get('from'))[1]
                 if sender_address != keys.allowed_sender:
                     print(f"{sender_address} is invalid!")
                     continue
                 print("Subject:", msg.get("Subject"))
 
-                # Prođi sve dijelove pošte
+                # Run through whole gmail message
                 from email.header import decode_header
                 for part in msg.walk():
                     raw_filename = part.get_filename()
                     if raw_filename:
-                        # Dekodiranje dokumenta (Neobavezno)
+                        # Decoding file (Optional)
                         decoded_parts = decode_header(raw_filename)
                         filename = ""
                         for part_str, encoding in decoded_parts:
@@ -53,7 +56,7 @@ def fetch_csv():
                                 filename += part_str
                         print("Decoded filename:", filename)
 
-                        # AKO JE CSV SPREMANJE NA RAČUNALO
+                        # If CSV save on PC
                         if filename.lower().endswith(".csv"):
                             filepath = os.path.join(keys.SAVE_PATH, filename)
                             with open(filepath, "wb") as csvfile:
@@ -61,11 +64,8 @@ def fetch_csv():
                             print(f"Saved CSV: {filepath}")
         mail.logout()
 
-        import os
-        import glob
-        import csv
-        from datetime import datetime
-
+     
+        # SQL section
         connect = psycopg2.connect(
             dbname="postgres",
             user="postgres",
@@ -96,13 +96,11 @@ def fetch_csv():
                     diastolic = int(row[3])
                     pulse = int(row[4])
                     notes = row[5] if len(row) > 5 else None
-                    dt = datetime.strptime(f"{date_part} {time_part}",
-                                           "%b %d %Y %H:%M")
+                    dt = datetime.strptime(f"{date_part} {time_part}", "%b %d %Y %H:%M")
                     cursor.execute("""
                         INSERT INTO bp_gmail (time, systolic, diastolic, pulse, notes)
                         VALUES (%s, %s, %s, %s, %s)
-                        ON CONFLICT (time) DO NOTHING
-                    """, (dt, systolic, diastolic, pulse, notes))
+                        ON CONFLICT (time) DO NOTHING """, (dt, systolic, diastolic, pulse, notes))
                 except Exception as e:
                     print("Skipping row:", row)
                     print("Error:", e)
